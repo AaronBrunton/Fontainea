@@ -1,0 +1,379 @@
+# Fontainea australis and oraria sdm predictions - AB & DS, April 2022
+#install.packages("geodata")
+icov2nstall.packages(c("dismo", "geodata", "sdm", "readr",
+                   "randomforest", "rgdal", "raster", "maptools", "sp",
+                   "leaflet", "mapview", "dplyr", "maptools"))
+
+update.packages(checkBuilt = TRUE, ask = FALSE)
+# not working
+install.packages('terra', repos='https://rspatial.r-universe.dev')
+library(terra)
+
+install.packages("devtools")
+install.packages("sf")
+install.packages("raster")
+install.packages("rlang")
+
+install.packages("sp", dependencies = TRUE)
+
+
+# Packages ----------------------------------------------------------------
+library(geodata)
+library(dismo)
+library(sdm)
+library(readr)
+library(randomForest)     
+library(rgdal)
+library(raster)
+#library(rJava)
+library(maptools)
+library(sp)
+library(leaflet)
+library(mapview)
+library(dplyr)
+library(maptools)
+library(caret)
+
+## download bioclim data from worldclim
+bio <- raster::getData("worldclim",var="bio",res=0.5, lon= 153.284651, lat=-28.250347) #  (res=0.5 for ~1km2 need to supply gps data somehwere in stuidy extent to d'load)
+bio
+
+plot(bio[[2]])
+
+curr_bionames <- c("AMT",
+                   "Mean_DiR",
+                   "Iso",
+                   "Tmp_Seasonality",
+                   "Mx_Tmp_Warm_Mth",
+                   "Mn_Temp_Cold_Mth",
+                   "Tmp_AR",
+                   "Mean_Tmp_Wet_Qtr",
+                   "Mean_Tmp_Driest_Qtr",
+                   "Mean_Tmp_Warm_Qtr",
+                   "Mean_Tmp_Cold_Qtr",
+                   "Annual_Precip",
+                   "Precip_Wet_Mth",
+                   "Precip_Driest_Mth",
+                   "Precip_Season",
+                   "Precip_Wet_Qtr",
+                   "Precip_Driest_Qtr",
+                   "Precip_Warm_Qtr",
+                   "Precip_Cold_Qtr"
+)
+names(bio) <- curr_bionames
+bio
+plot(bio[[1]], main = names(bio[[1]]))
+## Divide temp data by 10 to return 'real' values
+ten_div <-
+  c(1, 2, 5, 6, 7, 8, 9, 10, 11)  #the layers we want to divide by ten
+
+for (layer in ten_div) {
+  bio[[layer]] <- bio[[layer]] / 10
+}
+bio
+
+## create raster layer of Australia
+fao <- read.csv(file = 'FA_FO_locdat.csv', stringsAsFactors = TRUE) 
+fao <- fao[ , c("longitude", "latitude")]
+fao
+# prepare coordinates, data, and proj4string
+coords <- fao[ , c("longitude", "latitude")] # coordinates
+data   <- fao[,2:3]# data
+crs    <- CRS("+proj=longlat +datum=WGS84 +no_defs") # proj4string of coords
+
+# make the SpatialPointsDataFrame object
+fao_spdf <- SpatialPointsDataFrame(coords = coords, data = data, proj4string = crs)
+fao_spdf
+
+## create elevation raster for Australia ============== https://stackoverflow.com/questions/42331940/raster-package-error 
+##Yes!! this works, now to extract elevation for my points
+aus <- raster::getData('alt', country="AUS") ## make sure this line always includes the 'raster' as the getData function overlaps with other packages
+aus
+# generate slope, aspect and other terrain layers - https://www.rdocumentation.org/packages/raster/versions/3.4-13/topics/terrain
+# ter <- terrain(aus, opt= c("slope", "aspect"), unit="radians", neighbors=8)
+# plot(ter)
+
+# rasters for slope, aspect, hillshade 
+library(raster)
+slope <- terrain(aus, opt='slope')
+aspect <- terrain(aus, opt='aspect')
+hill <- hillShade(slope, aspect, 40, 270) # hillsshade generated from 40 deg angle from a W direction
+plot(hill, col=grey(0:100/100), legend=FALSE, main="Aus")
+plot(aus, col=rainbow(25, alpha=0.35), add=TRUE)
+
+## make a stack of these rasters - can we stack with bioclim variables
+s <- stack(slope, aspect, hill)
+s
+writeRaster(s, filename = "topo_stack.tif")
+
+## stack our raster layers of climate and habitat
+#------ first match extent for both raster stacks
+r_resam <- resample(s,bio,method='bilinear')
+
+#### stack our raster layers of climate and habitat
+fauorrasta <- stack(r_resam, bio)
+names(fauorrasta)
+
+plot(fauorrasta[[5]]) # check these rasters 
+
+# determine extent of area of interest based on presence locations
+buff <- 0.5   # a buffer of one degree around the raster
+
+xmin <- min(fao$lon) - buff
+xmax <- max(fao$lon) + buff
+ymin <- min(fao$lat) - buff
+ymax <- max(fao$lat) + buff
+
+buffe <- extent(xmin, xmax, ymin, ymax)
+
+# Crop env data to geographic extent of est range of F. australis
+fauenvdat <- crop(x = fauorrasta, y = buffe, debug=TRUE)
+fauenvdat
+# let's change that name 'layer' to hillshade
+names(fauenvdat)[names(fauenvdat) == 'layer'] <- 'hillshade'
+
+#install.packages("usdm")
+library(usdm)
+##-------------- check colinearity of variables
+v <- vifcor(fauenvdat, th=0.7)
+v
+
+# remove collinear variables from rasterstack of the variables
+fauspreds <- exclude (fauenvdat,v)
+fauspreds
+names(fauspreds)
+writeRaster(fauspreds, filename = "fonausor_preds.tif", overwrite = TRUE)
+
+# presence of env vraiable values for our location data
+# faoc<- faoc[,-1]
+auorpresvals <- extract(fauspreds, fao)
+tail(auorpresvals)
+summary(auorpresvals)
+summary(absval)
+
+##------------- generate background points and merge with presence values
+#install.packages('dismo', repos='https://rspatial.r-universe.dev')
+library(dismo)
+backgr <- randomPoints(fauspreds, 3232)# background points predictors
+absval <- raster::extract(fauspreds, backgr)
+tail(absval)
+presv <- c(rep(1, nrow(auorpresvals)), rep(0, nrow(absval)))
+presv
+sdmdat <- data.frame(cbind(presv, rbind(auorpresvals, absval)))
+head(sdmdat)
+summary(sdmdat)
+sdmdat$presv <- as.factor(sdmdat$presv)
+
+ # Five K-fold glm & RF from the top 
+#---------- run GLMs with five fold method
+set.seed(11)
+#create random points on cells of the 'env' object within the extent of bradypus and avoiding cells containing points from bradypus
+back.xy <- randomPoints(fauspreds, n=3232,p= fao,ext = buffe)
+#Create Spatial Points layer from back.xy
+backs<-SpatialPoints(back.xy)
+#absence values
+eA<-extract(fauspreds,backs)
+#presence values
+eP<-extract(fauspreds,fao)
+#create data frames from values
+Pres.cov<-data.frame(eP,Pres=1)
+Back.cov<-data.frame(eA,Pres=0)
+#combine
+all.cov<-rbind(Pres.cov,Back.cov)
+head(all.cov)
+tail(all.cov)
+summary(all.cov)
+
+set.seed(5)
+#set number of folds to use
+folds=5
+#partition presence and absence data according to folds using the kfold() function.
+kfold_pres <- kfold(Pres.cov, folds)
+kfold_back <- kfold(Back.cov, folds)
+### #create an empty list to hold our results (remember there will be 10 sets)
+fau_GLM2 <-list()
+par(mfrow=c(2,3))
+## now we can model ..phew!
+#create an empty list to hold our results (remember there will be five sets)
+eGLM2 <-list()
+par(mfrow=c(2,3))
+# for (i in 1:folds) {
+#   train <- Pres.cov[kfold_pres!= i,]
+#   test <- Pres.cov[kfold_pres == i,]
+#   backTrain<-Back.cov[kfold_back!=i,]
+#   backTest<-Back.cov[kfold_back==i,]
+#   dataTrain<-rbind(train,backTrain)
+#   dataTest<-rbind(test,backTest)
+#   glm_eval <- glm(Pres~.,binomial(link = "logit"), data=dataTrain)#this is our glm model trained on presence and absence points
+#   eGLM2[[i]] <- evaluate(p=dataTest[ which(dataTest$Pres==1),],a=dataTest[which(dataTest$Pres==0),], glm_eval)#use testing data (kfold==i) for model evaluation
+  
+  #check the AUC by plotting ROC values
+for (i in 1:folds) {
+  train <- Pres.cov[kfold_pres!= i,]
+  test <- Pres.cov[kfold_pres == i,]
+  backTrain<-Back.cov[kfold_back!=i,]
+  backTest<-Back.cov[kfold_back==i,]
+  dataTrain<-rbind(train,backTrain)
+  dataTest<-rbind(test,backTest)
+  intglm_eval <- glm(Pres ~ slope + aspect + hillshade + Iso + Mean_Tmp_Wet_Qtr + 
+                       Mean_Tmp_Driest_Qtr + Precip_Season + Precip_Warm_Qtr + slope:Mean_Tmp_Driest_Qtr + 
+                       slope:Precip_Warm_Qtr + aspect:hillshade + hillshade:Precip_Season + 
+                       Iso:Mean_Tmp_Wet_Qtr + Iso:Mean_Tmp_Driest_Qtr + Iso:Precip_Season + 
+                       Iso:Precip_Warm_Qtr + Mean_Tmp_Wet_Qtr:Mean_Tmp_Driest_Qtr + 
+                       Precip_Season:Precip_Warm_Qtr,binomial(link = "logit"), data=dataTrain)#this is our glm model trained on presence and absence points
+  eGLM3[[i]] <- evaluate(p=dataTest[ which(dataTest$Pres==1),],a=dataTest[which(dataTest$Pres==0),], intglm_eval)#use testing data (kfold==i) for model evaluation
+
+  
+  plot(eGLM2[[i]],'ROC')
+  
+}
+#inspect
+eGLM2
+# save glm as object for future analysis
+saveRDS(glm_eval, file = "glmeval_obj.rds")
+
+#Get model evaluation statistics:
+aucGLM <- sapply( eGLM2, function(x){slot(x, 'auc')} )
+#calculate the mean values for comparison with other models
+mean(aucGLM) #98.01
+#use the sapply() function to iterate over each item in our eGLM list and select the 't' value (this is the slot on eGLM which denotes a given threshold) for which corressponding values for TPR+TNR are highest (hence we use 'which.max')
+Opt_GLM<-sapply( eGLM2, function(x){ x@t[which.max(x@TPR + x@TNR)] } )
+Opt_GLM #[1] 0.1677737 0.2170249 0.2297904 0.2529044 0.2325924
+#take the mean to be applied to our predictions
+Mean_OptGLM<- mean(Opt_GLM)
+trGLM<-plogis(Mean_OptGLM)
+trGLM #[1] 0.1859129
+
+# base plots
+prGLM <- predict(fauspreds, glm_eval,type = "response")
+par(mfrow=c(1,2))
+dev.off()
+plot(prGLM, main='GLM, no interactions')
+plot(prGLM > trGLM, main='presence/absence')
+writeRaster(prGLM, filename = "prGLM_Jul22.tif")
+
+# Variable importance scores and plots
+library(vip)
+vi(glm_eval) #m1
+# A tibble: 8 x 3
+# Variable            Importance Sign 
+# <chr>                    <dbl> <chr>
+#   1 Precip_Warm_Qtr         10.6   POS  
+# 2 slope                   10.2   POS  
+# 3 hillshade                6.15  POS  
+# 4 Mean_Tmp_Driest_Qtr      4.70  POS  
+# 5 Mean_Tmp_Wet_Qtr         3.63  POS  
+# 6 Iso                      1.24  NEG  
+# 7 Precip_Season            0.999 NEG  
+# 8 aspect                   0.696 POS  
+p2 <- vip(glm_eval)
+plot(p2)
+library(ggplot2)
+p2 + theme_classic()
+
+vi(intglm_eval)
+# Variable                             Importance Sign 
+# <chr>                                     <dbl> <chr>
+#   1 Iso:Mean_Tmp_Driest_Qtr                    6.28 NEG  
+# 2 Mean_Tmp_Driest_Qtr                        6.26 POS  
+# 3 Iso:Mean_Tmp_Wet_Qtr                       5.59 POS  
+# 4 Mean_Tmp_Wet_Qtr                           5.59 NEG  
+# 5 aspect:hillshade                           5.53 NEG  
+# 6 aspect                                     5.47 POS  
+# 7 Iso:Precip_Warm_Qtr                        4.88 POS  
+# 8 Precip_Season:Precip_Warm_Qtr              4.61 NEG  
+# 9 Precip_Season                              4.53 POS  
+# 10 slope:Mean_Tmp_Driest_Qtr                  4.49 POS  
+# 11 Iso:Precip_Season                          4.21 NEG  
+# 12 Iso                                        3.98 NEG  
+# 13 Precip_Warm_Qtr                            3.93 NEG  
+# 14 hillshade                                  3.79 POS  
+# 15 hillshade:Precip_Season                    3.32 NEG  
+# 16 slope:Precip_Warm_Qtr                      2.66 NEG  
+# 17 slope                                      1.86 NEG  
+# 18 Mean_Tmp_Wet_Qtr:Mean_Tmp_Driest_Qtr       1.19 NEG 
+
+ # response plots
+library(visreg)
+visreg(glm_eval, "Precip_Warm_Qtr", scale = "response")
+visreg(glm_eval, "slope", scale = "response", type = "conditional")
+visreg(glm_eval, "hillshade", scale = "response")
+visreg(glm_eval, "Mean_Tmp_Driest_Qtr", scale = "response")
+visreg(glm_eval, "Mean_Tmp_Wet_Qtr", scale = "response")
+visreg(glm_eval, "Iso", scale = "response")
+
+
+dev.off()
+#-------- Down-sampled RF 
+#create an empty list to hold our results (remember there will be five sets)
+library(randomForest)
+eRF2<-list()
+par(mfrow=c(2,3))
+
+for (i in 1:folds) {
+  train <- Pres.cov[kfold_pres!= i,]
+  test <- Pres.cov[kfold_pres == i,]
+  backTrain<-Back.cov[kfold_back!=i,]
+  backTest<-Back.cov[kfold_back==i,]
+  dataTrain<-rbind(train,backTrain)
+  dataTest<-rbind(test,backTest)
+  fprNum <- as.numeric(table(dataTrain$Pres)["1"]) # number of presence records
+  fspsize <- c("0" = fprNum, "1" = fprNum) # sample size for both classes
+  set.seed(12)
+  RF_eval2 <- randomForest(as.factor(Pres)~., sampsize = fspsize,
+                           data=dataTrain)#this is our RF model
+  rf.pred2 <- predict(RF_eval2, type="prob")[,2]#make prediction
+  eRF2[[i]]<-evaluate(p = rf.pred2[which(dataTrain$Pres == "1")], #set p to be 1s from the dataTrain object 
+                     a = rf.pred2[which(dataTrain$Pres == "0")])# set a to be 0s from the dataTrain object
+  
+  #check the AUC by plotting ROC values
+  
+  plot(eRF2[[i]],'ROC')
+  
+}
+#Inspect
+eRF2
+# save RF as object for future analysis
+saveRDS(RF_eval2, file = "RFeval_obj.rds")
+#Get model evaluation statistics:
+aucRF <- sapply( eRF2, function(x){slot(x, 'auc')} )
+#calculate the mean values for comparison with other models
+mean(aucRF) #[1] 0.9997357
+#Get maxTPR+TNR for the Random Forest model
+Opt_RF<-sapply( eRF2, function(x){ x@t[which.max(x@TPR + x@TNR)] } )
+Opt_RF #[1] 0.5741263 0.8596561 0.6211121 0.8894349 0.9027571
+Mean_OptRF<-mean(Opt_RF)
+Mean_OptRF #[1] 0.7694173
+
+# RF base plots
+#prRF <- predict(fauspreds, RF_eval2)
+prRF2 <-predict(fauspreds, RF_eval2, type = "prob", index = 2)
+
+par(mfrow=c(1,2))
+plot(prRF2, main='Random Forest Prediction')
+plot(prRF2 > Mean_OptRF, main='presence/absence')
+
+writeRaster(prRF2, filename = "prRF2_Jul22.tif")
+# Variable Importance
+vi(RF_eval2)
+# Variable            Importance
+# <chr>                    <dbl>
+#   1 Precip_Warm_Qtr          63.8 
+# 2 slope                    26.0 
+# 3 aspect                   20.4 
+# 4 hillshade                13.5 
+# 5 Mean_Tmp_Wet_Qtr         13.4 
+# 6 Mean_Tmp_Driest_Qtr      13.4 
+# 7 Precip_Season             6.44
+# 8 Iso                       4.98
+p3 <- vip(RF_eval2)
+plot(p3)
+p3 + theme_classic()
+dev.off()
+library(visreg)
+visreg(RF_eval2, "Precip_Warm_Qtr")
+visreg(RF_eval2, "slope")
+visreg(RF_eval2, "aspect")
+visreg(RF_eval2, "hillshade")
+visreg(RF_eval2, "Mean_Tmp_Wet_Qtr")
+visreg(RF_eval2, "Mean_Tmp_Driest_Qtr")

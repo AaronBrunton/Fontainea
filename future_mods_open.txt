@@ -1,0 +1,125 @@
+# Updated future projections for Fontainea
+# fut 126 GLM
+fut1_glm <- predict(fut126_rasta, glm_eval,type = "response")
+par(mfrow=c(1,2))
+plot(fut1_glm, main='F126 GLM')
+  # glm interactions
+fut_intglm1 <- predict(fut126, intglm_eval, type = "response")
+fut126_rasta
+plot(fut_intglm1, main='F126 GLM')
+
+# fut 585 GLM
+fut2_glm <- predict(fut585rast,  glm_eval,type = "response")
+plot(fut2_glm,  main='F585 GLM') # check map
+dev.off()
+# fut2_intglm <- predict(fut585rast,  m9,type = "response")
+fut2_intglm <- predict(fut585rast, intglm_eval,type = "response")
+plot(fut2_intglm,  main='F585 intGLM')
+par(mfrow=c(1,3))
+plot(prGLM2, main='GLM, sig. interactions')
+plot(fut_intglm1, main='F126 int GLM')
+plot(fut2_intglm,  main='F585 intGLM')
+
+# fut 126 RF
+fut1_rf <- predict(fut126, RF_eval2,type = "prob", index = 2)#fut126_rasta
+plot(fut1_rf, main='F126 rf') # max pron = 0.67
+
+# fut 585 RF
+fut2_rf <- predict(fut585rast,  RF_eval2 ,type = "prob", index = 2)
+plot(fut2_rf,  main='F585 rf') # check map
+summary(fut1_glm)
+
+# future GLM projections for individual models
+glm_obj <- readRDS(file = "glmeval_obj.rds")
+hg1_glm <- predict(hg1_rasta, glm_obj,type = "response")
+cr1_glm <- predict(cr1_rasta, glm_obj,type = "response")
+fi1_glm <- predict(fi1_rasta, glm_obj,type = "response")
+
+hg2_glm <- predict(hg2_rasta, glm_obj,type = "response")
+cr2_glm <- predict(cr2_rasta, glm_obj,type = "response")
+fi2_glm <- predict(fi2_rasta, glm_obj,type = "response")
+ # glm interactions
+hg1_intglm <- predict(hg1_rasta, intglm_eval,type = "response")
+cr1_intglm <- predict(cr1_rasta, intglm_eval,type = "response")
+fi1_intglm <- predict(fi1_rasta, intglm_eval,type = "response")
+
+hg2_glm <- predict(hg2_rasta, intglm_eval,type = "response")
+cr2_glm <- predict(cr2_rasta, intglm_eval,type = "response")
+fi2_glm <- predict(fi2_rasta, intglm_eval,type = "response")
+
+
+  # future RF projections
+rf_obj <- readRDS(file = "RFeval_obj.rds")
+hg1_rf <- predict(hg1_rasta, rf_obj,type = "prob", index = 2)
+cr1_rf <- predict(cr1_rasta, rf_obj,type = "prob", index = 2)
+fi1_rf <- predict(fi1_rasta, rf_obj,type = "prob", index = 2)
+
+hg2_rf <- predict(hg2_rasta, rf_obj,type = "prob", index = 2)
+cr2_rf <- predict(cr2_rasta, rf_obj,type = "prob", index = 2)
+fi2_rf <- predict(fi2_rasta, rf_obj,type = "prob", index = 2)
+# plots
+  # GLM low emission
+par(mfrow=c(1,1))
+plot(hg1_glm, main='hg126 GLM', extent = buffe)
+plot(cr1_glm, main='cr126 GLM')
+plot(fi1_glm, main='fi126 GLM')
+  # GLM interactions
+plot(hg1_intglm, main='hg126 intGLM')
+plot(cr1_intglm, main='cr126 intGLM')
+plot(fi1_intglm, main='fi126 intGLM')
+  
+  # GLM high emission
+plot(hg2_glm, main='hg585 GLM')
+plot(cr2_glm, main='cr585 GLM')
+plot(fi2_glm, main='fi585 GLM')
+  # RF low emission
+par(mfrow=c(1,3))
+plot(hg1_rf, main='hg126 RF')
+plot(cr1_rf, main='cr126 RF')
+plot(fi1_rf, main='fi126 GLM')
+# RF high emission
+plot(hg2_rf, main='hg585 RF')
+plot(cr2_rf, main='cr585 RF')
+plot(fi2_rf, main='fi585 RF')
+
+names(cr2_rasta)
+dev.off()
+par(mfrow=c(2,2))
+# plots of low and high emission PWQ
+names(fauspreds)
+  # low
+plot(fauspreds[[8]], main ='current Mean Temp DQtr')
+plot(hg1_rasta[[8]], main ='hg585 Precip WQtr')
+plot(cr1_rasta[[8]], main = 'cr585 Precip WQtr')
+plot(fi1_rasta[[8]], main = 'fi585 Precip WQtr')
+  #high 
+plot(fauspreds[[8]], main ='current Mean Temp DQtr')
+plot(hg2_rasta[[8]], main ='hg585 Precip WQtr')
+plot(cr2_rasta[[8]], main = 'cr585 Precip WQtr')
+plot(fi2_rasta[[8]], main = 'fi585 Precip WQtr')
+# plots of current, low & high emission MTDQ
+  #curr
+plot(fauspreds[[6]], main ='current Mean Temp DQtr')
+  # low
+plot(hg1_rasta[[6]], main ='hg126 Mean Temp DQtr')
+plot(cr1_rasta[[6]], main ='cr126 Mean Temp DQtr')
+plot(fi1_rasta[[6]], main ='fi126 Mean Temp DQtr')
+  # high
+plot(fauspreds[[6]], main ='current Mean Temp DQtr')
+plot(hg2_rasta[[6]], main ='hg585 Mean Temp DQtr')
+plot(cr2_rasta[[6]], main ='cr585 Mean Temp DQtr')
+plot(fi2_rasta[[6]], main ='fi585 Mean Temp DQtr')
+
+# plots of low and high emission MTWQ
+names(fauspreds)
+# low
+plot(fauspreds[[5]], main ='current Mean Temp WQtr')
+plot(hg1_rasta[[5]], main ='hg126 Mean Temp WQtr')
+plot(cr1_rasta[[5]], main = 'cr126 Mean Temp WQtr')
+plot(fi1_rasta[[5]], main = 'fi126 Precip WQtr')
+#high 
+plot(fauspreds[[5]], main ='current Mean Temp WQtr')
+plot(hg2_rasta[[5]], main ='hg585 Mean Temp WQtr')
+plot(cr2_rasta[[5]], main = 'cr585 Mean Temp WQtr')
+plot(fi2_rasta[[5]], main = 'fi585 Mean Temp WQtr')
+

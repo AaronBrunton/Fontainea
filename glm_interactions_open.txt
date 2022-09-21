@@ -1,0 +1,119 @@
+## GLM models with interactions
+library(MASS)
+library(dplyr)
+library(caret)
+
+int_glm2 <- glm(Pres~. ^2,  family = binomial(link = "logit"), data=all.cov)
+summary(int_glm2)     
+
+#
+step.model <- int_glm2 %>% stepAIC(trace=FALSE)
+coef(step.model)
+summary(step.model)
+step.model$aic
+
+
+# Check which terms can be dropped --------------------------------------------------------------------
+anova(step.model, test = "Chi")
+m2 <- update(step.model, ~ . -Mean_Tmp_Wet_Qtr:Precip_Season)
+m3 <- stepAIC(m2)
+anova(m3, test = "Chi")
+m4 <- update(m3, ~. -Mean_Tmp_Wet_Qtr:Precip_Warm_Qtr)
+m5 <- stepAIC(m4)
+anova(m5, test = "Chi")
+m6 <- update(m5, ~. -Mean_Tmp_Driest_Qtr:Precip_Warm_Qtr)
+m7 <- stepAIC(m6)
+anova(m7, test = "Chi")
+m8 <- update(m7, ~. -aspect:Precip_Warm_Qtr)
+m9 <- stepAIC(m8)
+anova(m9, test = "Chi")
+summary(m9) # get model call
+
+eGLM3 <-list()
+par(mfrow=c(2,3))
+for (i in 1:folds) {
+  train <- Pres.cov[kfold_pres!= i,]
+  test <- Pres.cov[kfold_pres == i,]
+  backTrain<-Back.cov[kfold_back!=i,]
+  backTest<-Back.cov[kfold_back==i,]
+  dataTrain<-rbind(train,backTrain)
+  dataTest<-rbind(test,backTest)
+  intglm_eval <- glm(Pres ~ slope + aspect + hillshade + Iso + Mean_Tmp_Wet_Qtr + 
+                       Mean_Tmp_Driest_Qtr + Precip_Season + Precip_Warm_Qtr + slope:Mean_Tmp_Driest_Qtr + 
+                       slope:Precip_Warm_Qtr + aspect:hillshade + hillshade:Precip_Season + 
+                       Iso:Mean_Tmp_Wet_Qtr + Iso:Mean_Tmp_Driest_Qtr + Iso:Precip_Season + 
+                       Iso:Precip_Warm_Qtr + Mean_Tmp_Wet_Qtr:Mean_Tmp_Driest_Qtr + 
+                       Precip_Season:Precip_Warm_Qtr,binomial(link = "logit"), data=dataTrain)#this is our glm model trained on presence and absence points
+  eGLM3[[i]] <- evaluate(p=dataTest[ which(dataTest$Pres==1),],a=dataTest[which(dataTest$Pres==0),], intglm_eval)#use testing data (kfold==i) for model evaluation
+  
+  #check the AUC by plotting ROC values
+  
+  plot(eGLM3[[i]],'ROC')
+  
+}
+#inspect
+eGLM3
+# save glm as object for future analysis
+saveRDS(glm_eval, file = "glmeval_obj.rds")
+saveRDS(glm_eval, file = "int_glmeval_obj.rds")
+
+#Get model evaluation statistics:
+aucGLM2 <- sapply( eGLM3, function(x){slot(x, 'auc')} )
+#calculate the mean values for comparison with other models
+mean(aucGLM2) # inteactions = .9930097
+#use the sapply() function to iterate over each item in our eGLM list and select the 't' value (this is the slot on eGLM which denotes a given threshold) for which corressponding values for TPR+TNR are highest (hence we use 'which.max')
+Opt_GLM2<-sapply( eGLM3, function(x){ x@t[which.max(x@TPR + x@TNR)] } )
+Opt_GLM2 #[1] 0.1677737 0.2170249 0.2297904 0.2529044 0.2325924
+#take the mean to be applied to our predictions
+Mean_OptGLM2<- mean(Opt_GLM2)
+trGLM2<-plogis(Mean_OptGLM2)
+trGLM2#[1] 0.1242333
+
+# base plots
+prGLM2 <- predict(fauspreds, intglm_eval,type = "response")
+par(mfrow=c(1,2))
+plot(prGLM2, main='GLM, sig. interactions')
+plot(prGLM > trGLM, main='presence/absence')
+
+library(vip)
+vi(intglm_eval) 
+# Variable                             Importance Sign 
+# <chr>                                     <dbl> <chr>
+#   1 Iso:Mean_Tmp_Driest_Qtr                    6.28 NEG  
+# 2 Mean_Tmp_Driest_Qtr                        6.26 POS  
+# 3 Iso:Mean_Tmp_Wet_Qtr                       5.59 POS  
+# 4 Mean_Tmp_Wet_Qtr                           5.59 NEG  
+# 5 aspect:hillshade                           5.53 NEG  
+# 6 aspect                                     5.47 POS  
+# 7 Iso:Precip_Warm_Qtr                        4.88 POS  
+# 8 Precip_Season:Precip_Warm_Qtr              4.61 NEG  
+# 9 Precip_Season                              4.53 POS  
+# 10 slope:Mean_Tmp_Driest_Qtr                  4.49 POS  
+# 11 Iso:Precip_Season                          4.21 NEG  
+# 12 Iso                                        3.98 NEG  
+# 13 Precip_Warm_Qtr                            3.93 NEG  
+# 14 hillshade                                  3.79 POS  
+# 15 hillshade:Precip_Season                    3.32 NEG  
+# 16 slope:Precip_Warm_Qtr                      2.66 NEG  
+# 17 slope                                      1.86 NEG  
+# 18 Mean_Tmp_Wet_Qtr:Mean_Tmp_Driest_Qtr       1.19 NEG 
+intvip <- vip(intglm_eval)
+plot(intvip)
+intvip + theme_classic()
+# response plots
+library(visreg)
+visreg2d(intglm_eval, "Mean_Tmp_Driest_Qtr", "Iso", scale = "response")
+visreg2d(intglm_eval, "Mean_Tmp_Wet_Qtr", "Iso", scale = "response")
+visreg2d(intglm_eval, "aspect", "hillshade", scale = "response")
+
+visreg2d(RF_eval2, "Mean_Tmp_Driest_Qtr", "Iso")
+visreg(intglm_eval, "Precip_Warm_Qtr", scale = "response")
+visreg(glm_eval, "slope", scale = "response", type = "conditional")
+visreg(intglm_eval, "aspect", by = "hillshade")
+visreg(intglm_eval, "Mean_Tmp_Driest_Qtr", scale = "response")
+visreg(intglm_eval, "aspect", scale = "response")
+visreg(glm_eval, "Iso", scale = "response")
+
+visreg(intglm_eval, "Mean_Tmp_Driest_Qtr", scale = "response")
+visreg2d(intglm_eval, "Iso", "Precip_Warm_Qtr", plot.type="rgl")
+visreg2d(intglm_eval, "Mean_Tmp_Driest_Qtr", "Iso",scale = "response")
